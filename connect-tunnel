@@ -7,11 +7,10 @@ use Getopt::Long;
 
 use vars qw( %CONF $VERSION );
 
-my $CRLF = "\015\012";    # network EOL
 my %listen;               # listening sockets
 my %socket;               # tunnel sockets
 
-$VERSION = 0.02;
+$VERSION = 0.03;
 
 # default configuration
 %CONF = ( 'user-agent' => "connect-tunnel/$VERSION", );
@@ -53,6 +52,14 @@ LWP::UserAgent are supported (we use an LWP::UserAgent).
 This means we also support NTLM, since it is supported as from libwww-perl
 5.66.
 
+=item B<-L>, B<--local-only>
+
+Create the tunnels so that they will only listen on C<localhost>.
+Thus, only connections originating from the machine that runs
+B<connect-tunnel> will be accepted.
+
+That was the default behaviour in B<connect-tunnel> version 0.02.
+
 =item B<-P>, B<--proxy> I<proxy>[I<:port>]
 
 The proxy is required to connect the tunnels.
@@ -93,7 +100,7 @@ This option can be used several times for more verbose output.
 # get and check the options
 #
 GetOptions( \%CONF, "verbose|v+", "tunnel|T=s@", "proxy|P=s",
-    "proxy-authentication|A=s", "user-agent|U=s" );
+    "proxy-authentication|A=s", "local-only|L", "user-agent|U=s" );
 
 # create a homebrewed user agent class
 {
@@ -129,10 +136,11 @@ for ( @{ $CONF{tunnel} } ) {
       unless /^\d+:[\w.]+:\d+$/;
     my ( $port, $host, $hostport ) = split ':';
     my $socket = IO::Socket::INET->new(
+        $CONF{'local-only'} ? ( LocalAddr => 'localhost' ) : (),
         Listen    => 1,
-        LocalAddr => 'localhost',
         LocalPort => $port,
-        Proto     => 'tcp'
+        Proto     => 'tcp',
+        ReuseAddr => 1,
     );
     die "Tunnel error: $! for $_\n" if not defined $socket;
     @{ $listen{$socket} }{qw( self port host hostport dest )} =
@@ -162,15 +170,26 @@ outside:
                 -P proxy.company.com:8080 -T 22:ssh.example.com:443
                 -A book:s3kr3t
 
+But if you don't want anybody else to connect to your tunnels
+and through the proxy with I<your> credentials, use the
+B<--local-only> option:
+
+ connect-tunnel -U "Mozilla/4.03 [en] (X11; I; Linux 2.1.89 i586)"
+                -P proxy.company.com:8080 -T 22:ssh.example.com:443
+                -A book:s3kr3t -L
+
 If you have several destinations, there is no need to run several
 instances of B<connect-tunnel>:
 
  connect-tunnel -U "Mozilla/4.03 [en] (X11; I; Linux 2.1.89 i586)"
-                -P proxy.company.com:8080 -A book:s3kr3t
+                -P proxy.company.com:8080 -A book:s3kr3t -L
                 -T 22:ssh.example.com:443
                 -T 222:ssh2.example.com:443
 
 But naturally, you will need to correctly set up the ports in your clients.
+
+Mmm, such a long command line would perfectly fit in an alias or a F<.BAT>
+file. C<;-)>
 
 =head1 ENVIRONMENT VARIABLES
 
@@ -217,7 +236,7 @@ while ( my @ready = $select->can_read ) {
             }
 
             # the proxy socket
-            my $proxy = bless( $res->{client_socket}, 'IO::Socket::INET' );
+            my $proxy = $res->{client_socket};
             my ( $pport, $paddr ) = unpack_sockaddr_in( $proxy->peername );
             $paddr = join '.', unpack( 'C4', $paddr );
             print "$addr:$port -> $listen{$_}{dest} : ",
@@ -265,7 +284,6 @@ while ( my @ready = $select->can_read ) {
             if ( not defined $read ) {
                 warn "Unable to read from " . $socket{$sock}{host_port} . $/;
                 $read = 0;
-                next;
             }
 
             # end of connection
@@ -293,6 +311,12 @@ while ( my @ready = $select->can_read ) {
         }
     }
 }
+
+=head1 TODO
+
+Next version should have an option to create a control port, to which one
+could connect to interact with B<connect-tunnel> and add/remove tunnels,
+close connections, change the User-Agent string, and so on.
 
 =head1 AUTHOR
 

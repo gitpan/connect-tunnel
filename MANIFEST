@@ -3,3 +3,4 @@ MANIFEST
 Makefile.PL
 README
 connect-tunnel
+t/connect-tunnel.t
